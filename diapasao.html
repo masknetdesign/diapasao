@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diapasão Digital</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        /* Estilo para o botão de reprodução/parada */
+        .play-button {
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .play-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+        .play-button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        /* Estilo para o indicador de som ativo */
+        .indicator-active {
+            animation: pulse 1s infinite alternate;
+        }
+        @keyframes pulse {
+            from { transform: scale(1); opacity: 1; }
+            to { transform: scale(1.05); opacity: 0.8; }
+        }
+        /* Estilo para o spinner de carregamento */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-100 to-purple-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center border-b-4 border-blue-500">
+        <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Diapasão Digital</h1>
+        <p class="text-gray-600 mb-8">Gere tons precisos para afinar instrumentos ou como referência de tom.</p>
+
+        <div id="sound-indicator" class="w-8 h-8 rounded-full bg-gray-300 mx-auto mb-6 transition-colors duration-300"></div>
+
+        <div class="mb-6">
+            <label for="note-select" class="block text-lg font-semibold text-gray-700 mb-2">Selecionar Nota:</label>
+            <select id="note-select" class="w-full p-3 border-2 border-gray-300 rounded-lg text-center text-xl font-bold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent mb-4">
+                </select>
+
+            <label for="frequency-input" class="block text-lg font-semibold text-gray-700 mb-2">Frequência (Hz):</label>
+            <input type="number" id="frequency-input" value="440" min="20" max="20000"
+                   class="w-full p-3 border-2 border-gray-300 rounded-lg text-center text-2xl font-bold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent">
+        </div>
+
+        <button id="toggle-play"
+                class="play-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-xl text-xl uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 mb-4">
+            Iniciar
+        </button>
+
+        <button id="get-note-info"
+                class="play-button bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl text-lg uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-opacity-75 flex items-center justify-center mx-auto">
+            ✨ Saber Mais sobre a Nota
+            <span id="info-spinner" class="spinner ml-2 hidden"></span>
+        </button>
+
+        <div id="note-info-display" class="mt-8 p-6 bg-gray-50 border border-gray-200 rounded-lg text-left text-gray-700 hidden">
+            <h3 class="text-xl font-semibold text-gray-800 mb-3">Informações da Nota:</h3>
+            <p id="note-info-text" class="text-base leading-relaxed"></p>
+        </div>
+
+
+        <div id="message-box" class="mt-8 p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded-lg hidden" role="alert">
+            <p id="message-text"></p>
+            <button onclick="hideMessage()" class="ml-auto text-yellow-800 hover:text-yellow-900 font-bold focus:outline-none">
+                &times;
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Variáveis globais para o contexto de áudio e o oscilador
+        let audioContext;
+        let oscillator;
+        let isPlaying = false; // Estado para controlar se o som está tocando
+
+        // Elementos do DOM
+        const togglePlayButton = document.getElementById('toggle-play');
+        const frequencyInput = document.getElementById('frequency-input');
+        const soundIndicator = document.getElementById('sound-indicator');
+        const messageBox = document.getElementById('message-box');
+        const messageText = document.getElementById('message-text');
+        const noteSelect = document.getElementById('note-select');
+        const getNoteInfoButton = document.getElementById('get-note-info');
+        const noteInfoDisplay = document.getElementById('note-info-display');
+        const noteInfoText = document.getElementById('note-info-text');
+        const infoSpinner = document.getElementById('info-spinner');
+
+
+        // Frequências das notas (baseado em A4 = 440 Hz)
+        const noteFrequencies = {
+            "C4": 261.63, "C#4": 277.18, "D4": 293.66, "D#4": 311.13, "E4": 329.63,
+            "F4": 349.23, "F#4": 369.99, "G4": 392.00, "G#4": 415.30, "A4": 440.00,
+            "A#4": 466.16, "B4": 493.88,
+            "C5": 523.25, "C#5": 554.37, "D5": 587.33, "D#5": 622.25, "E5": 659.25,
+            "F5": 698.46, "F#5": 739.99, "G5": 783.99, "G#5": 830.61, "A5": 880.00,
+            "A#5": 932.33, "B5": 987.77
+        };
+
+        /**
+         * Preenche o menu suspenso de notas com as frequências definidas.
+         */
+        function populateNoteSelect() {
+            // Adiciona a opção padrão de 440 Hz primeiro
+            let defaultOption = document.createElement('option');
+            defaultOption.value = "440";
+            defaultOption.textContent = "A4 (440 Hz)";
+            noteSelect.appendChild(defaultOption);
+
+            for (const note in noteFrequencies) {
+                if (noteFrequencies.hasOwnProperty(note)) {
+                    let option = document.createElement('option');
+                    option.value = noteFrequencies[note];
+                    option.textContent = `${note} (${noteFrequencies[note].toFixed(2)} Hz)`;
+                    noteSelect.appendChild(option);
+                }
+            }
+            // Define a opção A4 (440 Hz) como selecionada por padrão
+            noteSelect.value = "440";
+        }
+
+        /**
+         * Exibe uma mensagem personalizada na caixa de mensagens.
+         * @param {string} message - A mensagem a ser exibida.
+         * @param {string} type - O tipo da mensagem (ex: 'error', 'info', 'warning').
+         */
+        function showMessage(message, type = 'info') {
+            messageText.textContent = message;
+            messageBox.className = `mt-8 p-4 rounded-lg flex items-center justify-between transition-all duration-300`;
+            switch (type) {
+                case 'error':
+                    messageBox.classList.add('bg-red-100', 'border-red-400', 'text-red-800');
+                    break;
+                case 'warning':
+                    messageBox.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800');
+                    break;
+                case 'success':
+                    messageBox.classList.add('bg-green-100', 'border-green-400', 'text-green-800');
+                    break;
+                default:
+                    messageBox.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-800');
+            }
+            messageBox.classList.remove('hidden');
+        }
+
+        /**
+         * Oculta a caixa de mensagens.
+         */
+        function hideMessage() {
+            messageBox.classList.add('hidden');
+        }
+
+        /**
+         * Inicia a reprodução do som.
+         */
+        async function startSound() {
+            try {
+                // Cria um novo AudioContext se ainda não existir
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+
+                // Verifica o estado do AudioContext e retoma se estiver suspenso
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
+                // Cria um novo oscilador
+                oscillator = audioContext.createOscillator();
+                // Define o tipo de onda (senoidal é o padrão para diapasão)
+                oscillator.type = 'sine';
+                // Pega a frequência do input e define no oscilador
+                oscillator.frequency.setValueAtTime(parseFloat(frequencyInput.value), audioContext.currentTime);
+
+                // Conecta o oscilador ao destino de áudio (alto-falantes)
+                oscillator.connect(audioContext.destination);
+                // Inicia o oscilador imediatamente
+                oscillator.start();
+
+                isPlaying = true;
+                togglePlayButton.textContent = 'Parar';
+                togglePlayButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                togglePlayButton.classList.add('bg-red-600', 'hover:bg-red-700');
+                soundIndicator.classList.add('bg-green-500', 'indicator-active');
+                soundIndicator.classList.remove('bg-gray-300');
+
+                // Opcional: Adiciona um evento para parar o oscilador após um tempo, se desejado
+                // oscillator.stop(audioContext.currentTime + 5); // Para após 5 segundos
+            } catch (error) {
+                console.error("Erro ao iniciar o som:", error);
+                showMessage("Não foi possível iniciar o som. Verifique as permissões de áudio do seu navegador.", 'error');
+                isPlaying = false; // Garante que o estado seja resetado em caso de erro
+                togglePlayButton.textContent = 'Iniciar';
+                togglePlayButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                togglePlayButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                soundIndicator.classList.remove('bg-green-500', 'indicator-active');
+                soundIndicator.classList.add('bg-gray-300');
+            }
+        }
+
+        /**
+         * Para a reprodução do som.
+         */
+        function stopSound() {
+            if (oscillator) {
+                // Para o oscilador
+                oscillator.stop();
+                // Desconecta o oscilador para liberar recursos
+                oscillator.disconnect();
+                oscillator = null; // Limpa a referência do oscilador
+            }
+            isPlaying = false;
+            togglePlayButton.textContent = 'Iniciar';
+            togglePlayButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+            togglePlayButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+            soundIndicator.classList.remove('bg-green-500', 'indicator-active');
+            soundIndicator.classList.add('bg-gray-300');
+        }
+
+        /**
+         * Alterna entre iniciar e parar o som.
+         */
+        togglePlayButton.addEventListener('click', () => {
+            if (isPlaying) {
+                stopSound();
+            } else {
+                startSound();
+            }
+        });
+
+        /**
+         * Atualiza a frequência do oscilador se o som estiver tocando.
+         */
+        frequencyInput.addEventListener('input', () => {
+            const newFrequency = parseFloat(frequencyInput.value);
+            // Garante que a frequência é um número válido e dentro dos limites
+            if (isNaN(newFrequency) || newFrequency < 20 || newFrequency > 20000) {
+                showMessage("Por favor, insira uma frequência válida entre 20 Hz e 20000 Hz.", 'warning');
+                return;
+            } else {
+                hideMessage(); // Oculta a mensagem se a entrada for válida
+            }
+
+            if (oscillator && isPlaying) {
+                // Define a nova frequência no oscilador
+                oscillator.frequency.setValueAtTime(newFrequency, audioContext.currentTime);
+            }
+            // Deseleciona qualquer opção no dropdown se a frequência for alterada manualmente
+            noteSelect.value = "";
+        });
+
+        /**
+         * Atualiza o campo de frequência quando uma nota é selecionada no dropdown.
+         */
+        noteSelect.addEventListener('change', () => {
+            const selectedFrequency = parseFloat(noteSelect.value);
+            frequencyInput.value = selectedFrequency;
+            if (oscillator && isPlaying) {
+                oscillator.frequency.setValueAtTime(selectedFrequency, audioContext.currentTime);
+            }
+            hideMessage(); // Oculta qualquer mensagem de erro ao selecionar uma nota válida
+        });
+
+        /**
+         * Obtém informações sobre a nota selecionada usando a API Gemini.
+         */
+        getNoteInfoButton.addEventListener('click', async () => {
+            const selectedNoteText = noteSelect.options[noteSelect.selectedIndex].textContent;
+            const currentFrequency = frequencyInput.value;
+
+            // Tenta extrair apenas o nome da nota (ex: "A4")
+            const noteNameMatch = selectedNoteText.match(/^([A-G][b#]?[0-9])/);
+            const noteForPrompt = noteNameMatch ? noteNameMatch[1] : `a frequência de ${currentFrequency} Hz`;
+
+            noteInfoText.textContent = ''; // Limpa o texto anterior
+            noteInfoDisplay.classList.add('hidden'); // Esconde a caixa de informações
+            infoSpinner.classList.remove('hidden'); // Mostra o spinner
+            getNoteInfoButton.disabled = true; // Desabilita o botão durante o carregamento
+
+            try {
+                const prompt = `Forneça 3-5 factos interessantes ou contexto musical sobre a nota ${noteForPrompt}. Mantenha a resposta concisa e em português de Portugal.`;
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+                const apiKey = ""; // A chave da API será fornecida em tempo de execução pelo Canvas
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    noteInfoText.textContent = text;
+                    noteInfoDisplay.classList.remove('hidden'); // Mostra a caixa de informações
+                } else {
+                    console.error("Estrutura de resposta inesperada da API Gemini:", result);
+                    showMessage("Não foi possível obter informações sobre a nota. Tente novamente.", 'error');
+                }
+            } catch (error) {
+                console.error("Erro ao chamar a API Gemini:", error);
+                showMessage("Erro ao comunicar com o serviço de informações da nota. Verifique a sua ligação à internet.", 'error');
+            } finally {
+                infoSpinner.classList.add('hidden'); // Esconde o spinner
+                getNoteInfoButton.disabled = false; // Reabilita o botão
+            }
+        });
+
+
+        // Garante que o áudio seja inicializado apenas após uma interação do usuário
+        // Isso é uma boa prática para evitar problemas de autoplay em navegadores
+        window.addEventListener('load', () => {
+            // Inicializa o contexto de áudio quando a página carrega, mas só resume/inicia no clique
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === 'suspended') {
+                // Adiciona um listener para retomar o contexto de áudio em qualquer interação do usuário
+                document.body.addEventListener('click', () => {
+                    if (audioContext.state === 'suspended') {
+                        audioContext.resume().then(() => {
+                            console.log('AudioContext resumed successfully');
+                        });
+                    }
+                }, { once: true }); // Executa apenas uma vez
+            }
+            populateNoteSelect(); // Preenche o dropdown de notas
+        });
+
+        // Lida com a visibilidade da mensagem ao carregar a página
+        hideMessage();
+    </script>
+</body>
+</html>
